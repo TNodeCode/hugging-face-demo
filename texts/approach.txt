@@ -1,0 +1,957 @@
+2. Approach
+
+2.1. Natural Language Supervision
+
+At the core of our approach is the idea of learning perception
+from supervision contained in natural language. As
+discussed in the introduction, this is not at all a new idea,
+however terminology used to describe work in this space
+is varied, even seemingly contradictory, and stated motivations
+are diverse. Zhang et al. (2020), Gomez et al. (2017),
+Joulin et al. (2016), and Desai & Johnson (2020) all introduce
+methods which learn visual representations from text
+paired with images but describe their approaches as unsupervised,
+self-supervised, weakly supervised, and supervised
+respectively.
+We emphasize that what is common across this line of work
+is not any of the details of the particular methods used but
+the appreciation of natural language as a training signal. All
+these approaches are learning from natural language supervision.
+Although early work wrestled with the complexity
+of natural language when using topic model and n-gram
+representations, improvements in deep contextual representation
+learning suggest we now have the tools to effectively
+leverage this abundant source of supervision (McCann et al.,
+2017).
+Learning from natural language has several potential
+strengths over other training methods. It’s much easier
+to scale natural language supervision compared to standard
+crowd-sourced labeling for image classification since it does
+not require annotations to be in a classic “machine learning
+compatible format” such as the canonical 1-of-N majority
+vote “gold label”. Instead, methods which work on natural
+language can learn passively from the supervision contained
+in the vast amount of text on the internet. Learning from
+natural language also has an important advantage over most
+unsupervised or self-supervised learning approaches in that
+it doesn’t “just” learn a representation but also connects that
+representation to language which enables flexible zero-shot
+transfer. In the following subsections, we detail the specific
+approach we settled on.
+
+2.2. Creating a Sufficiently Large Dataset
+
+Existing work has mainly used three datasets, MS-COCO
+(Lin et al., 2014), Visual Genome (Krishna et al., 2017), and
+YFCC100M (Thomee et al., 2016). While MS-COCO and
+Visual Genome are high quality crowd-labeled datasets, they
+are small by modern standards with approximately 100,000
+training photos each. By comparison, other computer vision
+systems are trained on up to 3.5 billion Instagram photos
+(Mahajan et al., 2018). YFCC100M, at 100 million photos,
+is a possible alternative, but the metadata for each image is
+sparse and of varying quality. Many images use automatically
+generated filenames like 20160716 113957.JPG
+as “titles” or contain “descriptions” of camera exposure
+settings. After filtering to keep only images with natural
+language titles and/or descriptions in English, the dataset
+shrunk by a factor of 6 to only 15 million photos. This is
+approximately the same size as ImageNet.
+A major motivation for natural language supervision is the
+large quantities of data of this form available publicly on the
+internet. Since existing datasets do not adequately reflect
+this possibility, considering results only on them would underestimate
+the potential of this line of research. To address
+this, we constructed a new dataset of 400 million (image,
+text) pairs collected form a variety of publicly available
+sources on the Internet. To attempt to cover as broad a set
+of visual concepts as possible, we search for (image, text)
+pairs as part of the construction process whose text includes
+one of a set of 500,000 queries.1 We approximately class
+balance the results by including up to 20,000 (image, text)
+pairs per query. The resulting dataset has a similar total
+word count as the WebText dataset used to train GPT-2. We
+refer to this dataset as WIT for WebImageText.
+
+2.3. Selecting an Efficient Pre-Training Method
+
+State-of-the-art computer vision systems use very large
+amounts of compute. Mahajan et al. (2018) required 19
+GPU years to train their ResNeXt101-32x48d and Xie et al.
+(2020) required 33 TPUv3 core-years to train their Noisy
+Student EfficientNet-L2. When considering that both these
+systems were trained to predict only 1000 ImageNet classes,
+the task of learning an open set of visual concepts from
+natural language seems daunting. In the course of our efforts,
+we found training efficiency was key to successfully
+scaling natural language supervision and we selected our
+final pre-training method based on this metric.
+Our initial approach, similar to VirTex, jointly trained an
+image CNN and text transformer from scratch to predict the
+caption of an image. However, we encountered difficulties
+efficiently scaling this method. In Figure 2 we show that a
+63 million parameter transformer language model, which
+already uses twice the compute of its ResNet-50 image
+encoder, learns to recognize ImageNet classes three times
+slower than a much simpler baseline that predicts a bag-ofwords
+encoding of the same text.
+Both these approaches share a key similarity. They try to predict
+the exact words of the text accompanying each image.
+This is a difficult task due to the wide variety of descriptions,
+comments, and related text that co-occur with images. Recent
+work in contrastive representation learning for images
+has found that contrastive objectives can learn better representations
+than their equivalent predictive objective (Tian
+et al., 2019). Other work has found that although generative
+models of images can learn high quality image representations,
+they require over an order of magnitude more compute
+than contrastive models with the same performance (Chen
+et al., 2020a). Noting these findings, we explored training
+a system to solve the potentially easier proxy task of predicting
+only which text as a whole is paired with which
+image and not the exact words of that text. Starting with
+the same bag-of-words encoding baseline, we swapped the
+predictive objective for a contrastive objective in Figure 2
+and observed a further 4x efficiency improvement in the rate
+of zero-shot transfer to ImageNet.
+Given a batch of N (image, text) pairs, CLIP is trained to
+predict which of the N  N possible (image, text) pairings
+across a batch actually occurred. To do this, CLIP learns a
+with high pointwise mutual information as well as the names of
+all Wikipedia articles above a certain search volume. Finally all
+WordNet synsets not already in the query list are added.
+multi-modal embedding space by jointly training an image
+encoder and text encoder to maximize the cosine similarity
+of the image and text embeddings of the N real pairs
+in the batch while minimizing the cosine similarity of the
+embeddings of the N2 􀀀 N incorrect pairings. We optimize
+a symmetric cross entropy loss over these similarity
+scores. In Figure 3 we include pseudocode of the core of an
+implementation of CLIP. To our knowledge this batch construction
+technique and objective was first introduced in the
+area of deep metric learning as the multi-class N-pair loss
+Sohn (2016), was popularized for contrastive representation
+learning by Oord et al. (2018) as the InfoNCE loss, and was
+recently adapted for contrastive (text, image) representation
+learning in the domain of medical imaging by Zhang et al.
+(2020).
+Due to the large size of our pre-training dataset, over-fitting
+is not a major concern and the details of training CLIP are
+simplified compared to the implementation of Zhang et al.
+(2020). We train CLIP from scratch without initializing the
+image encoder with ImageNet weights or the text encoder
+with pre-trained weights. We do not use the non-linear
+projection between the representation and the contrastive
+embedding space, a change which was introduced by Bachman
+et al. (2019) and popularized by Chen et al. (2020b).
+We instead use only a linear projection to map from each encoder’s
+representation to the multi-modal embedding space.
+We did not notice a difference in training efficiency between
+the two versions and speculate that non-linear projections
+may be co-adapted with details of current image only in
+self-supervised representation learning methods. We also
+remove the text transformation function tu from Zhang et al.
+(2020) which samples a single sentence at uniform from
+the text since many of the (image, text) pairs in CLIP’s pretraining
+dataset are only a single sentence. We also simplify
+the image transformation function tv. A random square
+crop from resized images is the only data augmentation
+used during training. Finally, the temperature parameter
+which controls the range of the logits in the softmax,  , is
+directly optimized during training as a log-parameterized
+multiplicative scalar to avoid turning as a hyper-parameter.
+
+2.4. Choosing and Scaling a Model
+
+We consider two different architectures for the image encoder.
+For the first, we use ResNet-50 (He et al., 2016a)
+as the base architecture for the image encoder due to its
+widespread adoption and proven performance. We make several
+modifications to the original version using the ResNet-
+D improvements from He et al. (2019) and the antialiased
+rect-2 blur pooling from Zhang (2019). We also replace
+the global average pooling layer with an attention pooling
+mechanism. The attention pooling is implemented as a single
+layer of “transformer-style” multi-head QKV attention
+where the query is conditioned on the global average-pooled
+representation of the image. For the second architecture, we
+experiment with the recently introduced Vision Transformer
+(ViT) (Dosovitskiy et al., 2020). We closely follow their
+implementation with only the minor modification of adding
+an additional layer normalization to the combined patch
+and position embeddings before the transformer and use a
+slightly different initialization scheme.
+The text encoder is a Transformer (Vaswani et al., 2017)
+with the architecture modifications described in Radford
+et al. (2019). As a base size we use a 63M-parameter 12-
+layer 512-wide model with 8 attention heads. The transformer
+operates on a lower-cased byte pair encoding (BPE)
+representation of the text with a 49,152 vocab size (Sennrich
+et al., 2015). For computational efficiency, the max
+sequence length was capped at 76. The text sequence is
+bracketed with [SOS] and [EOS] tokens and the activations
+of the highest layer of the transformer at the [EOS]
+token are treated as the feature representation of the text
+which is layer normalized and then linearly projected into
+the multi-modal embedding space. Masked self-attention
+was used in the text encoder to preserve the ability to initialize
+with a pre-trained language model or add language
+modeling as an auxiliary objective, though exploration of
+this is left as future work.
+While previous computer vision research has often scaled
+models by increasing the width (Mahajan et al., 2018) or
+depth (He et al., 2016a) in isolation, for the ResNet image
+encoders we adapt the approach of Tan & Le (2019) which
+found that allocating additional compute across all of width,
+depth, and resolution outperforms only allocating it to only
+one dimension of the model. While Tan & Le (2019) tune
+the ratio of compute allocated to each dimension for their
+EfficientNet architecture, we use a simple baseline of allocating
+additional compute equally to increasing the width,
+depth, and resolution of the model. For the text encoder, we
+only scale the width of the model to be proportional to the
+calculated increase in width of the ResNet and do not scale
+the depth at all, as we found CLIP’s performance to be less
+sensitive to the capacity of the text encoder.
+
+2.5. Training
+
+We train a series of 5 ResNets and 3 Vision Transformers.
+For the ResNets we train a ResNet-50, a ResNet-101, and
+then 3 more which follow EfficientNet-style model scaling
+and use approximately 4x, 16x, and 64x the compute of a
+ResNet-50. They are denoted as RN50x4, RN50x16, and
+RN50x64 respectively. For the Vision Transformers we
+train a ViT-B/32, a ViT-B/16, and a ViT-L/14. We train all
+models for 32 epochs. We use the Adam optimizer (Kingma
+& Ba, 2014) with decoupled weight decay regularization
+(Loshchilov & Hutter, 2017) applied to all weights that are
+not gains or biases, and decay the learning rate using a
+cosine schedule (Loshchilov & Hutter, 2016). Initial hyperparameters
+were set using a combination of grid searches,
+random search, and manual tuning on the baseline ResNet-
+50 model when trained for 1 epoch. Hyper-parameters were
+then adapted heuristically for larger models due to computational
+constraints. The learnable temperature parameter
+ was initialized to the equivalent of 0.07 from (Wu et al.,
+2018) and clipped to prevent scaling the logits by more
+than 100 which we found necessary to prevent training instability.
+We use a very large minibatch size of 32,768.
+Mixed-precision (Micikevicius et al., 2017) was used to accelerate
+training and save memory. To save additional memory,
+gradient checkpointing (Griewank & Walther, 2000;
+Chen et al., 2016), half-precision Adam statistics (Dhariwal
+et al., 2020), and half-precision stochastically rounded text
+encoder weights were used. The calculation of embedding
+similarities was also sharded with individual GPUs computing
+only the subset of the pairwise similarities necessary for
+their local batch of embeddings. The largest ResNet model,
+RN50x64, took 18 days to train on 592 V100 GPUs while
+the largest Vision Transformer took 12 days on 256 V100
+GPUs. For the ViT-L/14 we also pre-train at a higher 336
+pixel resolution for one additional epoch to boost performance
+similar to FixRes (Touvron et al., 2019). We denote
+this model as ViT-L/14@336px. Unless otherwise specified,
+all results reported in this paper as “CLIP” use this model
+which we found to perform best.
+
+3. Experiments
+
+3.1. Zero-Shot Transfer
+
+3.1.1. MOTIVATION
+
+In computer vision, zero-shot learning usually refers to the
+study of generalizing to unseen object categories in image
+classification (Lampert et al., 2009). We instead use the
+term in a broader sense and study generalization to unseen
+datasets. We motivate this as a proxy for performing unseen
+tasks, as aspired to in the zero-data learning paper of
+Larochelle et al. (2008). While much research in the field of
+unsupervised learning focuses on the representation learning
+capabilities of machine learning systems, we motivate
+studying zero-shot transfer as a way of measuring the tasklearning
+capabilities of machine learning systems. In this
+view, a dataset evaluates performance on a task on a specific
+distribution. However, many popular computer vision
+datasets were created by the research community primarily
+as benchmarks to guide the development of generic image
+classification methods rather than measuring performance
+on a specific task. While it is reasonable to say that the
+SVHN dataset measures the task of street number transcription
+on the distribution of Google Street View photos, it is
+unclear what “real” task the CIFAR-10 dataset measures.
+It is clear, however, what distribution CIFAR-10 is drawn
+from - TinyImages (Torralba et al., 2008). On these kinds of
+datasets, zero-shot transfer is more an evaluation of CLIP’s
+robustness to distribution shift and domain generalization
+rather than task generalization. Please see Section 3.3 for
+analysis focused on this.
+To our knowledge, Visual N-Grams (Li et al., 2017) first
+studied zero-shot transfer to existing image classification
+datasets in the manner described above. It is also the only
+other work we are aware of that has studied zero-shot transfer
+to standard image classification datasets using a generically
+pre-trained model and serves as the best reference
+point for contextualizing CLIP. Their approach learns the
+parameters of a dictionary of 142,806 visual n-grams (spanning
+1- to 5- grams) and optimizes these n-grams using a
+differential version of Jelinek-Mercer smoothing to maximize
+the probability of all text n-grams for a given image.
+In order to perform zero-shot transfer, they first convert the
+text of each of the dataset’s class names into its n-gram
+representation and then compute its probability according
+to their model, predicting the one with the highest score.
+Our focus on studying zero-shot transfer as an evaluation of
+task learning is inspired by work demonstrating task learning
+in the field of NLP. To our knowledge Liu et al. (2018)
+first identified task learning as an “unexpected side-effect”
+when a language model trained to generate Wikipedia articles
+learned to reliably transliterate names between languages.
+While GPT-1 (Radford et al., 2018) focused on pretraining
+as a transfer learning method to improve supervised
+fine-tuning, it also included an ablation study demonstrating
+that the performance of four heuristic zero-shot transfer
+methods improved steadily over the course of pre-training,
+without any supervised adaption. This analysis served as the
+basis for GPT-2 (Radford et al., 2019) which focused exclusively
+on studying the task-learning capabilities of language
+models via zero-shot transfer.
+
+3.1.2. USING CLIP FOR ZERO-SHOT TRANSFER
+
+CLIP is pre-trained to predict if an image and a text snippet
+are paired together in its dataset. To perform zero-shot classification,
+we reuse this capability. For each dataset, we use
+the names of all the classes in the dataset as the set of potential
+text pairings and predict the most probable (image, text)
+pair according to CLIP. In a bit more detail, we first compute
+the feature embedding of the image and the feature embedding
+of the set of possible texts by their respective encoders.
+The cosine similarity of these embeddings is then calculated,
+scaled by a temperature parameter  , and normalized into a
+probability distribution via a softmax. Note that this prediction
+layer is a multinomial logistic regression classifier with
+L2-normalized inputs, L2-normalized weights, no bias, and
+temperature scaling. When interpreted this way, the image
+encoder is the computer vision backbone which computes a
+feature representation for the image and the text encoder is a
+hypernetwork (Ha et al., 2016) which generates the weights
+of a linear classifier based on the text specifying the visual
+concepts that the classes represent. Lei Ba et al. (2015) first
+introduced a zero-shot image classifier of this form while
+the idea of generating a classifier from natural language
+dates back to at least Elhoseiny et al. (2013). Continuing
+with this interpretation, every step of CLIP pre-training can
+be viewed as optimizing the performance of a randomly
+created proxy to a computer vision dataset which contains 1
+example per class and has 32,768 total classes defined via
+natural language descriptions. For zero-shot evaluation, we
+cache the zero-shot classifier once it has been computed by
+the text encoder and reuse it for all subsequent predictions.
+This allows the cost of generating it to be amortized across
+all the predictions in a dataset.
+
+3.1.3. INITIAL COMPARISON TO VISUAL N-GRAMS
+
+In Table 1 we compare Visual N-Grams to CLIP. The best
+CLIP model improves accuracy on ImageNet from a proof
+of concept 11.5% to 76.2% and matches the performance
+of the original ResNet-50 despite using none of the 1.28
+million crowd-labeled training examples available for this
+dataset. Additionally, the top-5 accuracy of CLIP models
+are noticeably higher than their top-1, and this model has a
+95% top-5 accuracy, matching Inception-V4 (Szegedy et al.,
+2016). The ability to match the performance of a strong,
+fully supervised baselines in a zero-shot setting suggests
+CLIP is a significant step towards flexible and practical
+zero-shot computer vision classifiers. As mentioned above,
+the comparison to Visual N-Grams is meant for contextualizing
+the performance of CLIP and should not be interpreted
+as a direct methods comparison between CLIP and
+Visual N-Grams as many performance relevant differences
+between the two systems were not controlled for. For instance,
+we train on a dataset that is 10x larger, use a vision
+model that requires nearly 100x more compute per prediction,
+likely used over 1000x their training compute, and
+use a transformer-based model which did not exist when
+Visual N-Grams was published. As a closer comparison, we
+trained a CLIP ResNet-50 on the same YFCC100M dataset
+that Visual N-Grams was trained on and found it matched
+their reported ImageNet performance within a V100 GPU
+day. This baseline was also trained from scratch instead of
+being initialized from pre-trained ImageNet weights as in
+Visual N-Grams.
+CLIP also outperforms Visual N-Grams on the other 2 reported
+datasets. On aYahoo, CLIP achieves a 95% reduction
+in the number of errors, and on SUN, CLIP more than doubles
+the accuracy of Visual N-Grams. To conduct a more
+comprehensive analysis and stress test, we implement a
+much larger evaluation suite detailed in Appendix A. In
+total we expand from the 3 datasets reported in Visual NGrams
+to include over 30 datasets and compare to over 50
+existing computer vision systems to contextualize results.
+
+3.1.4. PROMPT ENGINEERING AND ENSEMBLING
+
+Most standard image classification datasets treat the information
+naming or describing classes which enables natural
+language based zero-shot transfer as an afterthought. The
+vast majority of datasets annotate images with just a numeric
+id of the label and contain a file mapping these ids back to
+their names in English. Some datasets, such as Flowers102
+and GTSRB, don’t appear to include this mapping at all
+in their released versions preventing zero-shot transfer entirely.
+2 For many datasets, we observed these labels may be
+chosen somewhat haphazardly and do not anticipate issues
+related to zero-shot transfer which relies on task description
+in order to transfer successfully.
+A common issue is polysemy. When the name of a class
+is the only information provided to CLIP’s text encoder it
+is unable to differentiate which word sense is meant due to
+the lack of context. In some cases multiple meanings of the
+same word might be included as different classes in the same
+dataset! This happens in ImageNet which contains both
+construction cranes and cranes that fly. Another example is
+found in classes of the Oxford-IIIT Pet dataset where the
+word boxer is, from context, clearly referring to a breed of
+dog, but to a text encoder lacking context could just as likely
+refer to a type of athlete.
+Another issue we encountered is that it’s relatively rare in
+our pre-training dataset for the text paired with the image
+to be just a single word. Usually the text is a full sentence
+describing the image in some way. To help bridge this
+distribution gap, we found that using the prompt template
+“A photo of a flabelg.” to be a good default that
+helps specify the text is about the content of the image. This
+often improves performance over the baseline of using only
+the label text. For instance, just using this prompt improves
+accuracy on ImageNet by 1.3%.
+Similar to the “prompt engineering” discussion around GPT-
+3 (Brown et al., 2020; Gao et al., 2020), we have also
+observed that zero-shot performance can be significantly
+improved by customizing the prompt text to each task. A
+few, non exhaustive, examples follow. We found on several
+fine-grained image classification datasets that it helped to
+specify the category. For example on Oxford-IIIT Pets, using
+“A photo of a flabelg, a type of pet.”
+to help provide context worked well. Likewise, on Food101
+specifying a type of food and on FGVC Aircraft a type of
+aircraft helped too. For OCR datasets, we found that putting
+quotes around the text or number to be recognized improved
+performance. Finally, we found that on satellite image classification
+datasets it helped to specify that the images were of
+this form and we use variants of “a satellite photo
+of a flabelg.”.
+We also experimented with ensembling over multiple zeroshot
+classifiers as another way of improving performance.
+These classifiers are computed by using different context
+prompts such as ‘A photo of a big flabelg” and
+“A photo of a small flabelg”. We construct the
+ensemble over the embedding space instead of probability
+space. This allows us to cache a single set of averaged text
+embeddings so that the compute cost of the ensemble is the
+same as using a single classifier when amortized over many
+predictions. We’ve observed ensembling across many generated
+zero-shot classifiers to reliably improve performance
+and use it for the majority of datasets. On ImageNet, we
+ensemble 80 different context prompts and this improves
+performance by an additional 3.5% over the single default
+prompt discussed above. When considered together, prompt
+engineering and ensembling improve ImageNet accuracy
+by almost 5%. In Figure 4 we visualize how prompt engineering
+and ensembling change the performance of a set of
+CLIP models compared to the contextless baseline approach
+of directly embedding the class name as done in Li et al.
+(2017).
+
+3.1.5. ANALYSIS OF ZERO-SHOT CLIP PERFORMANCE
+
+Since task-agnostic zero-shot classifiers for computer vision
+have been understudied, CLIP provides a promising opportunity
+to gain a better understanding of this type of model.
+In this section, we conduct a study of various properties of
+CLIP’s zero-shot classifiers. As a first question, we look
+simply at how well zero-shot classifiers perform. To contextualize
+this, we compare to the performance of a simple
+off-the-shelf baseline: fitting a fully supervised, regularized,
+logistic regression classifier on the features of the canonical
+ResNet-50. In Figure 5 we show this comparison across 27
+datasets. Please see Appendix A for details of datasets and
+setup.
+Zero-shot CLIP outperforms this baseline slightly more of-
+individual datasets reveals some interesting behavior. On
+fine-grained classification tasks, we observe a wide spread
+in performance. On two of these datasets, Stanford Cars and
+Food101, zero-shot CLIP outperforms logistic regression
+on ResNet-50 features by over 20% while on two others,
+Flowers102 and FGVCAircraft, zero-shot CLIP underperforms
+by over 10%. On OxfordPets and Birdsnap, performance
+is much closer. We suspect these difference are
+primarily due to varying amounts of per-task supervision
+between WIT and ImageNet. On “general” object classification
+datasets such as ImageNet, CIFAR10/100, STL10, and
+PascalVOC2007 performance is relatively similar with a
+slight advantage for zero-shot CLIP in all cases. On STL10,
+CLIP achieves 99.3% overall which appears to be a new
+state of the art despite not using any training examples. Zeroshot
+CLIP significantly outperforms a ResNet-50 on two
+datasets measuring action recognition in videos. On Kinetics700,
+CLIP outperforms a ResNet-50 by 14.5%. Zeroshot
+CLIP also outperforms a ResNet-50’s features by 7.7%
+on UCF101. We speculate this is due to natural language
+providing wider supervision for visual concepts involving
+verbs, compared to the noun-centric object supervision in
+ImageNet.
+Looking at where zero-shot CLIP notably underperforms,
+we see that zero-shot CLIP is quite weak on several specialized,
+complex, or abstract tasks such as satellite image
+classification (EuroSAT and RESISC45), lymph node tumor
+detection (PatchCamelyon), counting objects in synthetic
+scenes (CLEVRCounts), self-driving related tasks such as
+German traffic sign recognition (GTSRB), recognizing distance
+to the nearest car (KITTI Distance). These results
+highlight the poor capability of zero-shot CLIP on more
+complex tasks. By contrast, non-expert humans can robustly
+perform several of these tasks, such as counting, satellite
+image classification, and traffic sign recognition, suggesting
+significant room for improvement. However, we caution
+that it is unclear whether measuring zero-shot transfer, as
+opposed to few-shot transfer, is a meaningful evaluation for
+difficult tasks that a learner has no prior experience with,
+such as lymph node tumor classification for almost all humans
+(and possibly CLIP).
+While comparing zero-shot performance to fully supervised
+models contextualizes the task-learning capabilities of CLIP,
+comparing to few-shot methods is a more direct comparison,
+since zero-shot is its limit. In Figure 6, we visualize
+how zero-shot CLIP compares to few-shot logistic regression
+on the features of many image models including the
+best publicly available ImageNet models, self-supervised
+learning methods, and CLIP itself. While it is intuitive to
+expect zero-shot to underperform one-shot, we instead find
+that zero-shot CLIP matches the performance of 4-shot logistic
+regression on the same feature space. This is likely
+due to an important difference between the zero-shot and
+few-shot approach. First, CLIP’s zero-shot classifier is generated
+via natural language which allows for visual concepts
+to be directly specified (“communicated”). By contrast,
+“normal” supervised learning must infer concepts indirectly
+from training examples. Context-less example-based learning
+has the drawback that many different hypotheses can
+be consistent with the data, especially in the one-shot case.
+A single image often contains many different visual concepts.
+Although a capable learner is able to exploit visual
+cues and heuristics, such as assuming that the concept being
+demonstrated is the primary object in an image, there is no
+guarantee.
+A potential resolution of this discrepancy between zeroshot
+and few-shot performance is to use CLIP’s zero-shot
+classifier as a prior for the weights of the few-shot classifier.
+While adding an L2 penalty towards the generated weights
+is a straightforward implementation of this idea, we found
+that hyperparameter optimization would often select for
+such a large value of this regularizer that the resulting fewshot
+classifier was “just” the zero-shot classifier. Research
+into better methods of combining the strength of zero-shot
+transfer with flexibility of few-shot learning is a promising
+direction for future work.
+When comparing zero-shot CLIP to few-shot logistic regression
+on the features of other models, zero-shot CLIP
+roughly matches the performance of the best performing
+16-shot classifier in our evaluation suite, which uses the features
+of a BiT-M ResNet-152x2 trained on ImageNet-21K.
+We are certain that a BiT-L model trained on JFT-300M
+would perform even better but these models have not been
+publicly released. That a BiT-M ResNet-152x2 performs
+best in a 16-shot setting is somewhat surprising since, as
+analyzed in Section 3.2, the Noisy Student EfficientNet-L2
+outperforms it in a fully supervised setting by almost 5% on
+average across 27 datasets.
+In addition to studying the average performance of zero-shot
+CLIP and few-shot logistic regression, we also examine
+performance on individual datasets. In Figure 7, we show
+estimates for the number of labeled examples per class that
+a logistic regression classifier on the same feature space
+requires to match the performance of zero-shot CLIP. Since
+zero-shot CLIP is also a linear classifier, this estimates the
+effective data efficiency of zero-shot transfer in this setting.
+In order to avoid training thousands of linear classifiers,
+we estimate the effective data efficiency based on a loglinear
+interpolation of the performance of a 1, 2, 4, 8, 16-
+shot (when possible), and a fully supervised linear classifier
+trained on each dataset. We find that zero-shot transfer can
+have widely varying efficiency per dataset from less than 1
+labeled example per class to 184. Two datasets, Flowers102
+and EuroSAT underperform one-shot models. Half of the
+datasets require less than 5 examples per class with a median
+of 5.4. However, the mean estimated data efficiency is 20.8
+examples per class. This is due to the 20% of datasets
+where supervised classifiers require many labeled examples
+per class in order to match performance. On ImageNet,
+zero-shot CLIP matches the performance of a 16-shot linear
+classifier trained on the same feature space.
+If we assume that evaluation datasets are large enough that
+the parameters of linear classifiers trained on them are well
+estimated, then, because CLIP’s zero-shot classifier is also
+a linear classifier, the performance of the fully supervised
+classifiers roughly sets an upper bound for what zero-shot
+transfer can achieve. In Figure 8 we compare CLIP’s zeroshot
+performance with fully supervised linear classifiers
+across datasets. The dashed, y = x line represents an “optimal”
+zero-shot classifier that matches the performance of
+its fully supervised equivalent. For most datasets, the performance
+of zero-shot classifiers still underperform fully supervised
+classifiers by 10% to 25%, suggesting that there is
+still plenty of headroom for improving CLIP’s task-learning
+and zero-shot transfer capabilities.
+There is a positive correlation of 0.82 (p-value < 10􀀀6)
+between zero-shot performance and fully supervised perfor-
+mance, suggesting that CLIP is relatively consistent at connecting
+underlying representation and task learning to zeroshot
+transfer. However, zero-shot CLIP only approaches
+fully supervised performance on 5 datasets: STL10, CIFAR10,
+Food101, OxfordPets, and Caltech101. On all 5
+datasets, both zero-shot accuracy and fully supervised accuracy
+are over 90%. This suggests that CLIP may be more
+effective at zero-shot transfer for tasks where its underlying
+representations are also high quality. The slope of a
+linear regression model predicting zero-shot performance
+as a function of fully supervised performance estimates that
+for every 1% improvement in fully supervised performance,
+zero-shot performance improves by 1.28%. However, the
+95th-percentile confidence intervals still include values of
+less than 1 (0.93-1.79).
+Over the past few years, empirical studies of deep learning
+systems have documented that performance is predictable as
+a function of important quantities such as training compute
+and dataset size (Hestness et al., 2017; Kaplan et al., 2020).
+The GPT family of models has so far demonstrated consistent
+improvements in zero-shot performance across a 1000x
+increase in training compute. In Figure 9, we check whether
+the zero-shot performance of CLIP follows a similar scaling
+pattern. We plot the average error rate of the 5 ResNet CLIP
+models across 39 evaluations on 36 different datasets and
+find that a similar log-log linear scaling trend holds for CLIP
+across a 44x increase in model compute. While the overall
+trend is smooth, we found that performance on individual
+evaluations can be much noisier. We are unsure whether
+this is caused by high variance between individual training
+runs on sub-tasks (as documented in D’Amour et al. (2020))
+masking a steadily improving trend or whether performance
+is actually non-monotonic as a function of compute on some
+tasks.
+
+3.2. Representation Learning
+
+While we have extensively analyzed the task-learning capabilities
+of CLIP through zero-shot transfer in the previous
+section, it is more common to study the representation
+learning capabilities of a model. There exist many ways to
+evaluate the quality of representations as well as disagreements
+over what properties an “ideal” representation should
+have (Locatello et al., 2020). Fitting a linear classifier on
+a representation extracted from the model and measuring
+its performance on various datasets is a common approach.
+An alternative is measuring the performance of end-to-end
+fine-tuning of the model. This increases flexibility, and
+prior work has convincingly demonstrated that fine-tuning
+outperforms linear classification on most image classification
+datasets (Kornblith et al., 2019; Zhai et al., 2019).
+While the high performance of fine-tuning motivates its
+study for practical reasons, we still opt for linear classifier
+based evaluation for several reasons. Our work is focused
+on developing a high-performing task and dataset-agnostic
+pre-training approach. Fine-tuning, because it adapts representations
+to each dataset during the fine-tuning phase,
+can compensate for and potentially mask failures to learn
+general and robust representations during the pre-training
+phase. Linear classifiers, because of their limited flexibility,
+instead highlight these failures and provide clear feedback
+during development. For CLIP, training supervised linear
+classifiers has the added benefit of being very similar to the
+approach used for its zero-shot classifiers which enables
+extensive comparisons and analysis in Section 3.1. Finally,
+we aim to compare CLIP to a comprehensive set of existing
+models across many tasks. Studying 66 different models on
+27 different datasets requires tuning 1782 different evaluations.
+Fine-tuning opens up a much larger design and hyperparameter
+space, which makes it difficult to fairly evaluate
+and computationally expensive to compare a diverse set of
+techniques as discussed in other large scale empirical studies
+(Lucic et al., 2018; Choi et al., 2019). By comparison, linear
+classifiers require minimal hyper-parameter tuning and have
+standardized implementations and evaluation procedures.
+Please see Appendix A for further details on evaluation.
+Figure 10 summarizes our findings. To minimize selection
+effects that could raise concerns of confirmation or reporting
+bias, we first study performance on the 12 dataset evaluation
+suite from Kornblith et al. (2019). While small CLIP models
+such as a ResNet-50 and ResNet-101 outperform other
+ResNets trained on ImageNet-1K (BiT-S and the originals),
+they underperform ResNets trained on ImageNet-21K (BiTM).
+These small CLIP models also underperform models
+in the EfficientNet family with similar compute requirements.
+However, models trained with CLIP scale very well
+and the largest model we trained (ResNet-50x64) slightly
+outperforms the best performing existing model (a Noisy
+Student EfficientNet-L2) on both overall score and compute
+efficiency. We also find that CLIP vision transformers are
+about 3x more compute efficient than CLIP ResNets, which
+allows us to reach higher overall performance within our
+compute budget. These results qualitatively replicate the
+findings of Dosovitskiy et al. (2020) which reported that
+vision transformers are more compute efficient than convnets
+when trained on sufficiently large datasets. Our best
+overall model is a ViT-L/14 that is fine-tuned at a higher resolution
+of 336 pixels on our dataset for 1 additional epoch.
+This model outperforms the best existing model across this
+evaluation suite by an average of 2.6%.
+As Figure 21 qualitatively shows, CLIP models learn a wider
+set of tasks than has previously been demonstrated in a single
+computer vision model trained end-to-end from random
+initialization. These tasks include geo-localization, optical
+character recognition, facial emotion recognition, and action
+recognition. None of these tasks are measured in the evaluation
+suite of Kornblith et al. (2019). This could be argued
+to be a form of selection bias in Kornblith et al. (2019)’s
+study towards tasks that overlap with ImageNet. To address
+this, we also measure performance on a broader 27 dataset
+evaluation suite. This evaluation suite, detailed in Appendix
+A includes datasets representing the aforementioned tasks,
+German Traffic Signs Recognition Benchmark (Stallkamp
+et al., 2011), as well as several other datasets adapted from
+VTAB (Zhai et al., 2019).
+On this broader evaluation suite, the benefits of CLIP are
+more clear. All CLIP models, regardless of scale, outperform
+all evaluated systems in terms of compute efficiency.
+The improvement in average score of the best model over
+previous systems increases from 2.6% to 5%. We also find
+that self-supervised systems do noticeably better on our
+broader evaluation suite. For instance, while SimCLRv2
+still underperforms BiT-M on average on the 12 datasets
+of Kornblith et al. (2019), SimCLRv2 outperforms BiT-M
+on our 27 dataset evaluation suite. These findings suggest
+continuing to expand task diversity and coverage in order
+to better understand the “general” performance of systems.
+We suspect additional evaluation efforts along the lines of
+VTAB to be valuable.
+In addition to the aggregate analysis above, we visualize
+per-dataset differences in the performance of the best CLIP
+model and the best model in our evaluation suite across
+all 27 datasets in Figure 11. CLIP outperforms the Noisy
+Student EfficientNet-L2 on 21 of the 27 datasets. CLIP
+improves the most on tasks which require OCR (SST2
+and HatefulMemes), geo-localization and scene recognition
+(Country211, SUN397), and activity recognition in videos
+(Kinetics700 and UCF101). In addition CLIP also does
+much better on fine-grained car and traffic sign recognition
+(Stanford Cars and GTSRB). This may reflect a problem
+with overly narrow supervision in ImageNet. A result such
+as the 14.7% improvement on GTSRB could be indicative
+of an issue with ImageNet-1K, which has only a single label
+for all traffic and street signs. This could encourage
+a supervised representation to collapse intra-class details
+and hurt accuracy on a fine-grained downstream task. As
+mentioned, CLIP still underperforms the EfficientNet on
+several datasets. Unsurprisingly, the dataset that the EfficientNet
+does best relative to CLIP on is the one it was
+trained on: ImageNet. The EffcientNet also slightly outperforms
+CLIP on low-resolution datasets such as CIFAR10
+and CIFAR100. We suspect this is at least partly due to the
+lack of scale-based data augmentation in CLIP. The EfficientNet
+also does slightly better on PatchCamelyon and
+CLEVRCounts, datasets where overall performance is still
+low for both approaches.
+
+3.3. Robustness to Natural Distribution Shift
+
+In 2015, it was announced that a deep learning model exceeded
+human performance on the ImageNet test set (He
+et al., 2015). However, research in the subsequent years
+has repeatedly found that these models still make many simple
+mistakes (Dodge & Karam, 2017; Geirhos et al., 2018;
+Alcorn et al., 2019), and new benchmarks testing these systems
+has often found their performance to be much lower
+than both their ImageNet accuracy and human accuracy
+(Recht et al., 2019; Barbu et al., 2019). What explains this
+discrepancy? Various ideas have been suggested and studied
+(Ilyas et al., 2019; Geirhos et al., 2020). A common
+theme of proposed explanations is that deep learning models
+are exceedingly adept at finding correlations and patterns
+which hold across their training dataset and thus improve
+in-distribution performance. However many of these correlations
+and patterns are actually spurious and do not hold for
+other distributions and result in large drops in performance
+on other datasets.
+We caution that, to date, most of these studies limit their
+evaluation to models trained on ImageNet. Recalling the
+topic of discussion, it may be a mistake to generalize too
+far from these initial findings. To what degree are these
+failures attributable to deep learning, ImageNet, or some
+combination of the two? CLIP models, which are trained via
+natural language supervision on a very large dataset and are
+capable of high zero-shot performance, are an opportunity
+to investigate this question from a different angle.
+Taori et al. (2020) is a recent comprehensive study moving
+towards quantifying and understanding these behaviors
+for ImageNet models. Taori et al. (2020) study how the
+performance of ImageNet models change when evaluated
+on natural distribution shifts. They measure performance
+on a set of 7 distribution shifts: ImageNetV2 (Recht et al.,
+2019), ImageNet Sketch (Wang et al., 2019), Youtube-BB
+and ImageNet-Vid (Shankar et al., 2019), ObjectNet (Barbu
+et al., 2019), ImageNet Adversarial (Hendrycks et al., 2019),
+and ImageNet Rendition (Hendrycks et al., 2020a). They
+distinguish these datasets, which all consist of novel images
+collected from a variety of sources, from synthetic distribution
+shifts such as ImageNet-C (Hendrycks & Dietterich,
+2019), Stylized ImageNet (Geirhos et al., 2018), or adversarial
+attacks (Goodfellow et al., 2014) which are created by
+perturbing existing images in various ways. They propose
+this distinction because in part because they find that while
+several techniques have been demonstrated to improve performance
+on synthetic distribution shifts, they often fail to
+yield consistent improvements on natural distributions.3
+Across these collected datasets, the accuracy of ImageNet
+models drop well below the expectation set by the ImageNet
+validation set. For the following summary discussion
+we report average accuracy across all 7 natural distribution
+shift datasets and average accuracy across the corresponding
+class subsets of ImageNet unless otherwise specified.
+Additionally, for Youtube-BB and ImageNet-Vid, which
+have two different evaluation settings, we use the average
+of pm-0 and pm-10 accuracy.
+A ResNet-101 makes 5 times as many mistakes when evaluated
+on these natural distribution shifts compared to the
+ImageNet validation set. Encouragingly however, Taori et al.
+(2020) find that accuracy under distribution shift increases
+predictably with ImageNet accuracy and is well modeled
+as a linear function of logit-transformed accuracy. Taori
+et al. (2020) use this finding to propose that robustness
+analysis should distinguish between effective and relative
+robustness. Effective robustness measures improvements
+in accuracy under distribution shift above what is predicted
+by the documented relationship between in-distribution and
+out-of-distribution accuracy. Relative robustness captures
+any improvement in out-of-distribution accuracy. Taori et al.
+(2020) argue that robustness techniques should aim to improve
+both effective robustness and relative robustness.
+Almost all models studied in Taori et al. (2020) are trained
+or fine-tuned on the ImageNet dataset. Returning to the
+discussion in the introduction to this section - is training
+or adapting to the ImageNet dataset distribution the cause
+of the observed robustness gap? Intuitively, a zero-shot
+model should not be able to exploit spurious correlations
+or patterns that hold only on a specific distribution, since it
+is not trained on that distribution. 4 Thus it is reasonable
+to expect zero-shot models to have much higher effective
+robustness. In Figure 13, we compare the performance of
+zero-shot CLIP with existing ImageNet models on natural
+distribution shifts. All zero-shot CLIP models improve
+effective robustness by a large amount and reduce the size
+of the gap between ImageNet accuracy and accuracy under
+distribution shift by up to 75%.
+While these results show that zero-shot models can be much
+more robust, they do not necessarily mean that supervised
+learning on ImageNet causes a robustness gap. Other details
+of CLIP, such as its large and diverse pre-training dataset
+or use of natural language supervision could also result
+in much more robust models regardless of whether they
+are zero-shot or fine-tuned. As an initial experiment to
+potentially begin narrowing this down, we also measure
+how the performance of CLIP models change after adapting
+to the ImageNet distribution via a L2 regularized logistic
+regression classifier fit to CLIP features on the ImageNet
+training set. We visualize how performance changes from
+the zero-shot classifier in Figure 14. Although adapting
+CLIP to the ImageNet distribution increases its ImageNet
+accuracy by 9.2% to 85.4% overall, and ties the accuracy
+of the 2018 SOTA from Mahajan et al. (2018), average
+accuracy under distribution shift slightly decreases.
+It is surprising to see a 9.2% increase in accuracy, which corresponds
+to roughly 3 years of improvement in SOTA, fail
+to translate into any improvement in average performance
+under distribution shift. We also break down the differences
+between zero-shot accuracy and linear classifier accuracy
+per dataset in Figure 14 and find performance still increases
+significantly on one dataset, ImageNetV2. ImageNetV2
+closely followed the creation process of the original ImageNet
+dataset which suggests that gains in accuracy from
+supervised adaptation are closely concentrated around the
+ImageNet distribution. Performance decreases by 4.7% on
+ImageNet-R, 3.8% on ObjectNet, 2.8% on ImageNet Sketch,
+and 1.9% on ImageNet-A. The change in accuracy on the
+two other datasets, Youtube-BB and ImageNet Vid, is insignificant.
+How is it possible to improve accuracy by 9.2% on the ImageNet
+dataset with little to no increase in accuracy under
+distribution shift? Is the gain primarily from “exploiting
+spurious correlations”? Is this behavior unique to some combination
+of CLIP, the ImageNet datatset, and the distribution
+shifts studied, or a more general phenomena? Does it hold
+for end-to-end finetuning as well as linear classifiers? We
+do not have confident answers to these questions at this time.
+Prior work has also pre-trained models on distributions other
+than ImageNet, but it is common to study and release models
+only after they have been fine-tuned to ImageNet. As a
+step towards understanding whether pre-trained zero-shot
+models consistently have higher effective robustness than
+fine-tuned models, we encourage the authors of Mahajan
+et al. (2018), Kolesnikov et al. (2019), and Dosovitskiy et al.
+(2020) to, if possible, study these questions on their models
+as well.
+We also investigate another robustness intervention enabled
+by flexible zero-shot natural-language-based image classifiers.
+The target classes across the 7 transfer datasets are
+not always perfectly aligned with those of ImageNet. Two
+datasets, Youtube-BB and ImageNet-Vid, consist of superclasses
+of ImageNet. This presents a problem when trying
+to use the fixed 1000-way classifier of an ImageNet model
+to make predictions. Taori et al. (2020) handle this by maxpooling
+predictions across all sub-classes according to the
+ImageNet class hierarchy. Sometimes this mapping is much
+less than perfect. For the person class in Youtube-BB, predictions
+are made by pooling over the ImageNet classes for
+a baseball player, a bridegroom, and a scuba diver. With
+CLIP we can instead generate a custom zero-shot classifier
+for each dataset directly based on its class names. In
+Figure 14 we see that this improves average effective robustness
+by 5% but is concentrated in large improvements
+on only a few datasets. Curiously, accuracy on ObjectNet
+also increases by 2.3%. Although the dataset was designed
+to closely overlap with ImageNet classes, using the names
+provided for each class by ObjectNet’s creators still helps a
+small amount compared to using ImageNet class names and
+pooling predictions when necessary.
+While zero-shot CLIP improves effective robustness, Figure
+14 shows that the benefit is almost entirely gone in a fully
+supervised setting. To better understand this difference, we
+investigate how effective robustness changes on the continuum
+from zero-shot to fully supervised. In Figure 15 we
+visualize the performance of 0-shot, 1-shot, 2-shot, 4-shot
+..., 128-shot, and fully supervised logistic regression classifiers
+on the best CLIP model’s features. We see that while
+few-shot models also show higher effective robustness than
+existing models, this benefit fades as in-distribution performance
+increases with more training data and is mostly,
+though not entirely, gone for the fully supervised model.
+Additionally, zero-shot CLIP is notably more robust than
+a few-shot model with equivalent ImageNet performance.
+Across our experiments, high effective robustness seems to
+result from minimizing the amount of distribution specific
+training data a model has access to, but this comes at a cost
+of reducing dataset-specific performance.
+Taken together, these results suggest that the recent shift
+towards large-scale task and dataset agnostic pre-training
+combined with a reorientation towards zero-shot and fewshot
+benchmarking on broad evaluation suites (as advocated
+by Yogatama et al. (2019) and Linzen (2020)) promotes the
+development of more robust systems and provides a more
+accurate assessment of performance. We are curious to see
+if the same results hold for zero-shot models in the field
+of NLP such as the GPT family. While Hendrycks et al.
+(2020b) has reported that pre-training improves relative robustness
+on sentiment analysis, Miller et al. (2020)’s study
+of the robustness of question answering models under natural
+distribution shift finds, similar to Taori et al. (2020),
+little evidence of effective robustness improvements to date.

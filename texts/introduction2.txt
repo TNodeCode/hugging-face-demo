@@ -1,0 +1,65 @@
+While exciting as proofs of concept, using natural language
+supervision for image representation learning is still rare.
+This is likely because demonstrated performance on common
+benchmarks is much lower than alternative approaches.
+For example, Li et al. (2017) reach only 11.5% accuracy
+on ImageNet in a zero-shot setting. This is well below the
+88.4% accuracy of the current state of the art (Xie et al.,
+2020). It is even below the 50% accuracy of classic computer
+vision approaches (Deng et al., 2012). Instead, more
+narrowly scoped but well-targeted uses of weak supervision
+have improved performance. Mahajan et al. (2018) showed
+that predicting ImageNet-related hashtags on Instagram images
+is an effective pre-training task. When fine-tuned to
+ImageNet these pre-trained models increased accuracy by
+over 5% and improved the overall state of the art at the time.
+Kolesnikov et al. (2019) and Dosovitskiy et al. (2020) have
+also demonstrated large gains on a broader set of transfer
+benchmarks by pre-training models to predict the classes of
+the noisily labeled JFT-300M dataset.
+This line of work represents the current pragmatic middle
+ground between learning from a limited amount of supervised
+"gold-labels" and learning from practically unlimited
+amounts of raw text. However, it is not without compromises.
+Both works carefully design, and in the process limit,
+their supervision to 1000 and 18291 classes respectively.
+Natural language is able to express, and therefore supervise,
+a much wider set of visual concepts through its generality.
+Both approaches also use static softmax classifiers to
+perform prediction and lack a mechanism for dynamic outputs.
+This severely curtails their flexibility and limits their
+"zero-shot" capabilities.
+A crucial difference between these weakly supervised models
+and recent explorations of learning image representations
+directly from natural language is scale. While Mahajan et al.
+(2018) and Kolesnikov et al. (2019) trained their models for
+accelerator years on millions to billions of images, VirTex,
+ICMLM, and ConVIRT trained for accelerator days on one
+to two hundred thousand images. In this work, we close
+this gap and study the behaviors of image classifiers trained
+with natural language supervision at large scale. Enabled
+by the large amounts of publicly available data of this form
+on the internet, we create a new dataset of 400 million (image,
+text) pairs and demonstrate that a simplified version of
+ConVIRT trained from scratch, which we call CLIP, for Contrastive
+Language-Image Pre-training, is an efficient method
+of learning from natural language supervision. We study
+the scalability of CLIP by training a series of eight models
+spanning almost 2 orders of magnitude of compute and observe
+that transfer performance is a smoothly predictable
+function of compute (Hestness et al., 2017; Kaplan et al.,
+2020). We find that CLIP, similar to the GPT family, learns
+to perform a wide set of tasks during pre-training including
+OCR, geo-localization, action recognition, and many others.
+We measure this by benchmarking the zero-shot transfer
+performance of CLIP on over 30 existing datasets and find
+models. We also confirm these findings with linear-probe
+representation learning analysis and show that CLIP outperforms
+the best publicly available ImageNet model while
+also being more computationally efficient. We additionally
+find that zero-shot CLIP models are much more robust than
+equivalent accuracy supervised ImageNet models which
+suggests that zero-shot evaluation of task-agnostic models is
+much more representative of a model’s capability. These results
+have significant policy and ethical implications, which
+we consider in Section 7.

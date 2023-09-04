@@ -1,0 +1,56 @@
+Pre-training methods which learn directly from raw text
+have revolutionized NLP over the last few years (Dai &
+Le, 2015; Peters et al., 2018; Howard & Ruder, 2018; Radford
+et al., 2018; Devlin et al., 2018; Raffel et al., 2019).
+
+language modeling have scaled across many orders of magnitude
+in compute, model capacity, and data, steadily improving
+capabilities. The development of "text-to-text" as
+a standardized input-output interface (McCann et al., 2018;
+Radford et al., 2019; Raffel et al., 2019) has enabled taskagnostic
+architectures to zero-shot transfer to downstream
+datasets removing the need for specialized output heads or
+dataset specific customization. Flagship systems like GPT-3
+(Brown et al., 2020) are now competitive across many tasks
+with bespoke models while requiring little to no dataset
+specific training data.
+These results suggest that the aggregate supervision accessible
+to modern pre-training methods within web-scale collections
+of text surpasses that of high-quality crowd-labeled
+NLP datasets. However, in other fields such as computer
+vision it is still standard practice to pre-train models on
+crowd-labeled datasets such as ImageNet (Deng et al., 2009).
+Could scalable pre-training methods which learn directly
+from web text result in a similar breakthrough in computer
+vision? Prior work is encouraging.
+Over 20 years ago Mori et al. (1999) explored improving
+content based image retrieval by training a model to predict
+the nouns and adjectives in text documents paired with
+images. Quattoni et al. (2007) demonstrated it was possible
+to learn more data efficient image representations via
+manifold learning in the weight space of classifiers trained
+to predict words in captions associated with images. Srivastava
+& Salakhutdinov (2012) explored deep representation
+learning by training multimodal Deep Boltzmann
+Machines on top of low-level image and text tag features.
+Joulin et al. (2016) modernized this line of work and demonstrated
+that CNNs trained to predict words in image captions
+learn useful image representations. They converted
+the title, description, and hashtag metadata of images in the
+YFCC100M dataset (Thomee et al., 2016) into a bag-ofwords
+multi-label classification task and showed that pretraining
+AlexNet (Krizhevsky et al., 2012) to predict these
+labels learned representations which preformed similarly
+to ImageNet-based pre-training on transfer tasks. Li et al.
+(2017) then extended this approach to predicting phrase ngrams
+in addition to individual words and demonstrated the
+ability of their system to zero-shot transfer to other image
+classification datasets by scoring target classes based on
+their dictionary of learned visual n-grams and predicting the
+one with the highest score. Adopting more recent architectures
+and pre-training approaches, VirTex (Desai & Johnson,
+2020), ICMLM (Bulent Sariyildiz et al., 2020), and Con-
+VIRT (Zhang et al., 2020) have recently demonstrated the
+potential of transformer-based language modeling, masked
+language modeling, and contrastive objectives to learn image
+representations from text.

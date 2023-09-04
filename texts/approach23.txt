@@ -1,0 +1,71 @@
+2.3. Selecting an Efficient Pre-Training Method
+
+State-of-the-art computer vision systems use very large
+amounts of compute. Mahajan et al. (2018) required 19
+GPU years to train their ResNeXt101-32x48d and Xie et al.
+(2020) required 33 TPUv3 core-years to train their Noisy
+Student EfficientNet-L2. When considering that both these
+systems were trained to predict only 1000 ImageNet classes,
+the task of learning an open set of visual concepts from
+natural language seems daunting. In the course of our efforts,
+we found training efficiency was key to successfully
+scaling natural language supervision and we selected our
+final pre-training method based on this metric.
+Our initial approach, similar to VirTex, jointly trained an
+image CNN and text transformer from scratch to predict the
+caption of an image. However, we encountered difficulties
+efficiently scaling this method. In Figure 2 we show that a
+63 million parameter transformer language model, which
+already uses twice the compute of its ResNet-50 image
+encoder, learns to recognize ImageNet classes three times
+slower than a much simpler baseline that predicts a bag-ofwords
+encoding of the same text.
+Both these approaches share a key similarity. They try to predict
+the exact words of the text accompanying each image.
+This is a difficult task due to the wide variety of descriptions,
+comments, and related text that co-occur with images. Recent
+work in contrastive representation learning for images
+has found that contrastive objectives can learn better representations
+than their equivalent predictive objective (Tian
+et al., 2019). Other work has found that although generative
+models of images can learn high quality image representations,
+they require over an order of magnitude more compute
+than contrastive models with the same performance (Chen
+et al., 2020a). Noting these findings, we explored training
+a system to solve the potentially easier proxy task of predicting
+only which text as a whole is paired with which
+image and not the exact words of that text. Starting with
+the same bag-of-words encoding baseline, we swapped the
+predictive objective for a contrastive objective in Figure 2
+and observed a further 4x efficiency improvement in the rate
+of zero-shot transfer to ImageNet.
+Given a batch of N (image, text) pairs, CLIP is trained to
+predict which of the NxN possible (image, text) pairings
+across a batch actually occurred. To do this, CLIP learns a
+with high pointwise mutual information as well as the names of
+all Wikipedia articles above a certain search volume. Finally all
+WordNet synsets not already in the query list are added.
+multi-modal embedding space by jointly training an image
+encoder and text encoder to maximize the cosine similarity
+of the image and text embeddings of the N real pairs
+in the batch while minimizing the cosine similarity of the
+embeddings of the N2 􀀀 N incorrect pairings. We optimize
+a symmetric cross entropy loss over these similarity
+scores. In Figure 3 we include pseudocode of the core of an
+implementation of CLIP. To our knowledge this batch construction
+technique and objective was first introduced in the
+area of deep metric learning as the multi-class N-pair loss
+Sohn (2016), was popularized for contrastive representation
+learning by Oord et al. (2018) as the InfoNCE loss, and was
+recently adapted for contrastive (text, image) representation
+learning in the domain of medical imaging by Zhang et al.
+(2020).
+Due to the large size of our pre-training dataset, over-fitting
+is not a major concern and the details of training CLIP are
+simplified compared to the implementation of Zhang et al.
+(2020). We train CLIP from scratch without initializing the
+image encoder with ImageNet weights or the text encoder
+with pre-trained weights. We do not use the non-linear
+projection between the representation and the contrastive
+embedding space, a change which was introduced by Bachman
+et al. (2019) and popularized by Chen et al. (2020b).
